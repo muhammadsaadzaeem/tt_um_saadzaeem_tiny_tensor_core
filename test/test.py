@@ -21,12 +21,18 @@ async def reset(dut):
 async def send_byte(dut, value):
     dut.ui_in.value = value
     await RisingEdge(dut.clk)
+    dut.ui_in.value = 0
+    await RisingEdge(dut.clk)
 
 
 async def read_byte(dut):
     dut.ui_in.value = CMD_READ
     await RisingEdge(dut.clk)
-    return int(dut.uo_out.value)
+    await RisingEdge(dut.clk)
+    value = int(dut.uo_out.value)
+    dut.ui_in.value = 0
+    await RisingEdge(dut.clk)
+    return value
 
 
 @cocotb.test()
@@ -35,20 +41,15 @@ async def test_matrix_multiply(dut):
 
     await reset(dut)
 
-    # Enter load mode
     await send_byte(dut, CMD_LOAD)
 
-    # Load A=[1 2; 3 4], B=[5 6; 7 8]
     for value in [1, 2, 3, 4, 5, 6, 7, 8]:
         await send_byte(dut, value)
 
-    # Compute
     await send_byte(dut, CMD_COMPUTE)
 
-    # Wait for compute to finish
-    await ClockCycles(dut.clk, 20)
+    await ClockCycles(dut.clk, 30)
 
-    # Read 16 result bytes: c00,c01,c10,c11, little-endian INT32
     result_bytes = []
     for _ in range(16):
         result_bytes.append(await read_byte(dut))
