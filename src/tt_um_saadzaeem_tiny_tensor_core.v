@@ -11,22 +11,23 @@ module tt_um_saadzaeem_tiny_tensor_core (
     input  wire       rst_n
 );
 
-assign uio_oe  = 8'hFF;
-assign uio_out = {4'b0000, state};
-wire unused = &{ena, uio_in};
+assign uio_oe  = 8'hFE;              // uio[0] input strobe, rest outputs
+assign uio_out = {3'b000, done, state};
+wire strobe = uio_in[0];
+wire unused = &{ena, uio_in[7:1]};
 
 localparam CMD_LOAD    = 8'hA0;
 localparam CMD_COMPUTE = 8'hB0;
 localparam CMD_READ    = 8'hC0;
 
-localparam S_IDLE    = 4'd0;
-localparam S_LOAD    = 4'd1;
-localparam S_RESET   = 4'd2;
-localparam S_RUN0    = 4'd3;
-localparam S_RUN1    = 4'd4;
-localparam S_RUN2    = 4'd5;
-localparam S_WAIT    = 4'd6;
-localparam S_DONE    = 4'd7;
+localparam S_IDLE  = 4'd0;
+localparam S_LOAD  = 4'd1;
+localparam S_RESET = 4'd2;
+localparam S_RUN0  = 4'd3;
+localparam S_RUN1  = 4'd4;
+localparam S_RUN2  = 4'd5;
+localparam S_WAIT  = 4'd6;
+localparam S_DONE  = 4'd7;
 
 reg [3:0] state;
 reg [3:0] load_idx;
@@ -80,37 +81,35 @@ always @(posedge clk) begin
         case (state)
 
             S_IDLE: begin
-                uo_out <= 8'h00;
-
-                if (ui_in == CMD_LOAD) begin
+                if (strobe && ui_in == CMD_LOAD) begin
                     load_idx <= 0;
+                    read_idx <= 0;
                     state <= S_LOAD;
-                end else if (ui_in == CMD_COMPUTE) begin
+                end else if (strobe && ui_in == CMD_COMPUTE) begin
                     accel_rst <= 1;
                     state <= S_RESET;
-                end else if (ui_in == CMD_READ) begin
-                    read_idx <= 0;
-                    state <= S_DONE;
                 end
             end
 
             S_LOAD: begin
-                case (load_idx)
-                    4'd0: a00 <= ui_in;
-                    4'd1: a01 <= ui_in;
-                    4'd2: a10 <= ui_in;
-                    4'd3: a11 <= ui_in;
-                    4'd4: b00 <= ui_in;
-                    4'd5: b01 <= ui_in;
-                    4'd6: b10 <= ui_in;
-                    4'd7: b11 <= ui_in;
-                    default: ;
-                endcase
+                if (strobe) begin
+                    case (load_idx)
+                        4'd0: a00 <= ui_in;
+                        4'd1: a01 <= ui_in;
+                        4'd2: a10 <= ui_in;
+                        4'd3: a11 <= ui_in;
+                        4'd4: b00 <= ui_in;
+                        4'd5: b01 <= ui_in;
+                        4'd6: b10 <= ui_in;
+                        4'd7: b11 <= ui_in;
+                        default: ;
+                    endcase
 
-                if (load_idx == 4'd7)
-                    state <= S_IDLE;
-                else
-                    load_idx <= load_idx + 1;
+                    if (load_idx == 4'd7)
+                        state <= S_IDLE;
+                    else
+                        load_idx <= load_idx + 1;
+                end
             end
 
             S_RESET: begin
@@ -150,12 +149,14 @@ always @(posedge clk) begin
                 a0_in <= 0; a1_in <= 0;
                 b0_in <= 0; b1_in <= 0;
 
-                if (done)
+                if (done) begin
+                    read_idx <= 0;
                     state <= S_DONE;
+                end
             end
 
             S_DONE: begin
-                if (ui_in == CMD_READ) begin
+                if (strobe && ui_in == CMD_READ) begin
                     case (read_idx)
                         5'd0:  uo_out <= c00[7:0];
                         5'd1:  uo_out <= c00[15:8];
@@ -182,22 +183,18 @@ always @(posedge clk) begin
 
                     if (read_idx < 5'd15)
                         read_idx <= read_idx + 1;
-                end
-
-                if (ui_in == CMD_LOAD) begin
+                end else if (strobe && ui_in == CMD_LOAD) begin
                     load_idx <= 0;
                     read_idx <= 0;
                     state <= S_LOAD;
-                end else if (ui_in == CMD_COMPUTE) begin
+                end else if (strobe && ui_in == CMD_COMPUTE) begin
                     read_idx <= 0;
                     accel_rst <= 1;
                     state <= S_RESET;
                 end
             end
 
-            default: begin
-                state <= S_IDLE;
-            end
+            default: state <= S_IDLE;
 
         endcase
     end

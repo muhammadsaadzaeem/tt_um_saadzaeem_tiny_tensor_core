@@ -2,11 +2,9 @@ import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, ClockCycles
 
-
 CMD_LOAD = 0xA0
 CMD_COMPUTE = 0xB0
 CMD_READ = 0xC0
-
 
 async def reset(dut):
     dut.rst_n.value = 0
@@ -17,23 +15,22 @@ async def reset(dut):
     dut.rst_n.value = 1
     await ClockCycles(dut.clk, 2)
 
-
 async def send_byte(dut, value):
     dut.ui_in.value = value
+    dut.uio_in.value = 1
     await RisingEdge(dut.clk)
+    dut.uio_in.value = 0
     dut.ui_in.value = 0
     await RisingEdge(dut.clk)
-
 
 async def read_byte(dut):
     dut.ui_in.value = CMD_READ
+    dut.uio_in.value = 1
     await RisingEdge(dut.clk)
-    await RisingEdge(dut.clk)
-    value = int(dut.uo_out.value)
+    dut.uio_in.value = 0
     dut.ui_in.value = 0
     await RisingEdge(dut.clk)
-    return value
-
+    return int(dut.uo_out.value)
 
 @cocotb.test()
 async def test_matrix_multiply(dut):
@@ -48,19 +45,14 @@ async def test_matrix_multiply(dut):
 
     await send_byte(dut, CMD_COMPUTE)
 
-    await ClockCycles(dut.clk, 30)
+    await ClockCycles(dut.clk, 20)
 
     result_bytes = []
     for _ in range(16):
         result_bytes.append(await read_byte(dut))
 
     def le32(bytes4):
-        value = (
-            bytes4[0]
-            | (bytes4[1] << 8)
-            | (bytes4[2] << 16)
-            | (bytes4[3] << 24)
-        )
+        value = bytes4[0] | (bytes4[1] << 8) | (bytes4[2] << 16) | (bytes4[3] << 24)
         if value & 0x80000000:
             value -= 0x100000000
         return value
