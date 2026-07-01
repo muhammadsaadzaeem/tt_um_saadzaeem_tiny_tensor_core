@@ -1,73 +1,240 @@
-import cocotb
-from cocotb.clock import Clock
-from cocotb.triggers import RisingEdge, ClockCycles
+`default_nettype none
 
-CMD_LOAD = 0xA0
-CMD_COMPUTE = 0xB0
-CMD_READ = 0xC0
+module tt_um_saadzaeem_tiny_tensor_core (
+    input  wire [7:0] ui_in,
+    output reg  [7:0] uo_out,
+    input  wire [7:0] uio_in,
+    output wire [7:0] uio_out,
+    output wire [7:0] uio_oe,
+    input  wire       ena,
+    input  wire       clk,
+    input  wire       rst_n
+);
 
-async def reset(dut):
-    dut.rst_n.value = 0
-    dut.ena.value = 1
-    dut.ui_in.value = 0
-    dut.uio_in.value = 0
-    await ClockCycles(dut.clk, 5)
-    dut.rst_n.value = 1
-    await ClockCycles(dut.clk, 2)
+assign uio_oe  = 8'hFE;
+assign uio_out = {3'b000, done, state};
 
-async def send_byte(dut, value):
-    dut.ui_in.value = value
-    dut.uio_in.value = 1
-    await RisingEdge(dut.clk)
-    dut.uio_in.value = 0
-    dut.ui_in.value = 0
-    await RisingEdge(dut.clk)
+wire strobe = uio_in[0];
+wire unused = &{ena, uio_in[7:1]};
 
-async def read_byte(dut):
-    dut.ui_in.value = CMD_READ
-    dut.uio_in.value = 1
-    await RisingEdge(dut.clk)
-    dut.uio_in.value = 0
-    dut.ui_in.value = 0
-    await RisingEdge(dut.clk)
-    return int(dut.uo_out.value)
+localparam CMD_LOAD    = 8'hA0;
+localparam CMD_COMPUTE = 8'hB0;
+localparam CMD_READ    = 8'hC0;
 
-@cocotb.test()
-async def test_matrix_multiply(dut):
-    cocotb.start_soon(Clock(dut.clk, 20, units="ns").start())
+localparam S_IDLE  = 4'd0;
+localparam S_LOAD  = 4'd1;
+localparam S_RESET = 4'd2;
+localparam S_RUN0  = 4'd3;
+localparam S_RUN1  = 4'd4;
+localparam S_RUN2  = 4'd5;
+localparam S_WAIT  = 4'd6;
+localparam S_DONE  = 4'd7;
 
-    await reset(dut)
+reg [3:0] state;
+reg [3:0] load_idx;
+reg [4:0] read_idx;
 
-    await send_byte(dut, CMD_LOAD)
+reg [15:0] cycle_counter;
+reg [15:0] last_cycles;
 
-    for value in [1, 2, 3, 4, 5, 6, 7, 8]:
-        await send_byte(dut, value)
+reg signed [7:0] a00, a01, a10, a11;
+reg signed [7:0] b00, b01, b10, b11;
 
-    await send_byte(dut, CMD_COMPUTE)
+reg valid;
+reg accel_rst;
 
-    await ClockCycles(dut.clk, 20)
+reg signed [7:0] a0_in, a1_in, b0_in, b1_in;
 
-    result_bytes = []
-    for _ in range(18):
-        result_bytes.append(await read_byte(dut))
+wire signed [31:0] c00, c01, c10, c11;
+wire done;
 
-    def le32(bytes4):
-        value = bytes4[0] | (bytes4[1] << 8) | (bytes4[2] << 16) | (bytes4[3] << 24)
-        if value & 0x80000000:
-            value -= 0x100000000
-        return value
+function signed [31:0] relu32;
+    input signed [31:0] x;
+    begin
+        if (x < 0)
+            relu32 = 32'sd0;
+        else
+            relu32 = x;
+    end
+endfunction
 
-    c00 = le32(result_bytes[0:4])
-    c01 = le32(result_bytes[4:8])
-    c10 = le32(result_bytes[8:12])
-    c11 = le32(result_bytes[12:16])
-    cycles = result_bytes[16] | (result_bytes[17] << 8)
+wire signed [31:0] r00 = relu32(c00);
+wire signed [31:0] r01 = relu32(c01);
+wire signed [31:0] r10 = relu32(c10);
+wire signed [31:0] r11 = relu32(c11);
 
-    assert c00 == 19, f"c00 expected 19, got {c00}"
-    assert c01 == 22, f"c01 expected 22, got {c01}"
-    assert c10 == 43, f"c10 expected 43, got {c10}"
-    assert c11 == 50, f"c11 expected 50, got {c11}"
-    assert cycles > 0, f"cycle counter expected > 0, got {cycles}"
+systolic_2x2_real accel (
+    .clk(clk),
+    .rst(accel_rst),
+    .valid(valid),
+    .a0_in(a0_in),
+    .a1_in(a1_in),
+    .b0_in(b0_in),
+    .b1_in(b1_in),
+    .c00(c00),
+    .c01(c01),
+    .c10(c10),
+    .c11(c11),
+    .done(done)
+);
 
-    dut._log.info(f"Matrix result: [[{c00}, {c01}], [{c10}, {c11}]]")
-    dut._log.info(f"Measured accelerator latency: {cycles} cycles")
+always @(posedge clk) begin
+    if (!rst_n) begin
+        state <= S_IDLE;
+        load_idx <= 0;
+        read_idx <= 0;
+        cycle_counter <= 0;
+        last_cycles <= 0;
+        uo_out <= 0;
+
+        a00 <= 0; a01 <= 0; a10 <= 0; a11 <= 0;
+        b00 <= 0; b01 <= 0; b10 <= 0; b11 <= 0;
+
+        valid <= 0;
+        accel_rst <= 1;
+
+        a0_in <= 0; a1_in <= 0;
+        b0_in <= 0; b1_in <= 0;
+    end else begin
+        valid <= 0;
+        accel_rst <= 0;
+
+        case (state)
+
+            S_IDLE: begin
+                if (strobe && ui_in == CMD_LOAD) begin
+                    load_idx <= 0;
+                    read_idx <= 0;
+                    state <= S_LOAD;
+                end else if (strobe && ui_in == CMD_COMPUTE) begin
+                    accel_rst <= 1;
+                    cycle_counter <= 0;
+                    last_cycles <= 0;
+                    state <= S_RESET;
+                end
+            end
+
+            S_LOAD: begin
+                if (strobe) begin
+                    case (load_idx)
+                        4'd0: a00 <= ui_in;
+                        4'd1: a01 <= ui_in;
+                        4'd2: a10 <= ui_in;
+                        4'd3: a11 <= ui_in;
+                        4'd4: b00 <= ui_in;
+                        4'd5: b01 <= ui_in;
+                        4'd6: b10 <= ui_in;
+                        4'd7: b11 <= ui_in;
+                        default: ;
+                    endcase
+
+                    if (load_idx == 4'd7)
+                        state <= S_IDLE;
+                    else
+                        load_idx <= load_idx + 1;
+                end
+            end
+
+            S_RESET: begin
+                accel_rst <= 0;
+                cycle_counter <= cycle_counter + 1;
+                state <= S_RUN0;
+            end
+
+            S_RUN0: begin
+                valid <= 1;
+                cycle_counter <= cycle_counter + 1;
+                a0_in <= a00;
+                a1_in <= 8'sd0;
+                b0_in <= b00;
+                b1_in <= 8'sd0;
+                state <= S_RUN1;
+            end
+
+            S_RUN1: begin
+                valid <= 1;
+                cycle_counter <= cycle_counter + 1;
+                a0_in <= a01;
+                a1_in <= a10;
+                b0_in <= b10;
+                b1_in <= b01;
+                state <= S_RUN2;
+            end
+
+            S_RUN2: begin
+                valid <= 1;
+                cycle_counter <= cycle_counter + 1;
+                a0_in <= 8'sd0;
+                a1_in <= a11;
+                b0_in <= 8'sd0;
+                b1_in <= b11;
+                state <= S_WAIT;
+            end
+
+            S_WAIT: begin
+                valid <= 0;
+                a0_in <= 0; a1_in <= 0;
+                b0_in <= 0; b1_in <= 0;
+
+                if (done) begin
+                    last_cycles <= cycle_counter;
+                    read_idx <= 0;
+                    state <= S_DONE;
+                end else begin
+                    cycle_counter <= cycle_counter + 1;
+                end
+            end
+
+            S_DONE: begin
+                if (strobe && ui_in == CMD_READ) begin
+                    case (read_idx)
+                        5'd0:  uo_out <= r00[7:0];
+                        5'd1:  uo_out <= r00[15:8];
+                        5'd2:  uo_out <= r00[23:16];
+                        5'd3:  uo_out <= r00[31:24];
+
+                        5'd4:  uo_out <= r01[7:0];
+                        5'd5:  uo_out <= r01[15:8];
+                        5'd6:  uo_out <= r01[23:16];
+                        5'd7:  uo_out <= r01[31:24];
+
+                        5'd8:  uo_out <= r10[7:0];
+                        5'd9:  uo_out <= r10[15:8];
+                        5'd10: uo_out <= r10[23:16];
+                        5'd11: uo_out <= r10[31:24];
+
+                        5'd12: uo_out <= r11[7:0];
+                        5'd13: uo_out <= r11[15:8];
+                        5'd14: uo_out <= r11[23:16];
+                        5'd15: uo_out <= r11[31:24];
+
+                        5'd16: uo_out <= last_cycles[7:0];
+                        5'd17: uo_out <= last_cycles[15:8];
+
+                        default: uo_out <= 8'h00;
+                    endcase
+
+                    if (read_idx < 5'd17)
+                        read_idx <= read_idx + 1;
+                end else if (strobe && ui_in == CMD_LOAD) begin
+                    load_idx <= 0;
+                    read_idx <= 0;
+                    state <= S_LOAD;
+                end else if (strobe && ui_in == CMD_COMPUTE) begin
+                    read_idx <= 0;
+                    accel_rst <= 1;
+                    cycle_counter <= 0;
+                    last_cycles <= 0;
+                    state <= S_RESET;
+                end
+            end
+
+            default: state <= S_IDLE;
+
+        endcase
+    end
+end
+
+endmodule
+
+`default_nettype wire
