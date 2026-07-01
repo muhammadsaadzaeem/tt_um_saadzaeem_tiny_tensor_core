@@ -5,6 +5,7 @@ from cocotb.triggers import RisingEdge, ClockCycles
 CMD_LOAD = 0xA0
 CMD_COMPUTE = 0xB0
 CMD_READ = 0xC0
+CMD_SHIFT = 0xD0
 
 async def reset(dut):
     dut.rst_n.value = 0
@@ -32,42 +33,54 @@ async def read_byte(dut):
     await RisingEdge(dut.clk)
     return int(dut.uo_out.value)
 
+def relu_quant8(x, shift):
+    y = max(0, x) >> shift
+    if y > 127:
+        y = 127
+    return y
+
 @cocotb.test()
-async def test_matrix_multiply(dut):
+async def test_matrix_multiply_requantized(dut):
     cocotb.start_soon(Clock(dut.clk, 20, units="ns").start())
 
     await reset(dut)
 
+    shift = 0
+
+    await send_byte(dut, CMD_SHIFT)
+    await send_byte(dut, shift)
+
     await send_byte(dut, CMD_LOAD)
+
+    A = [[1, 2], [3, 4]]
+    B = [[5, 6], [7, 8]]
 
     for value in [1, 2, 3, 4, 5, 6, 7, 8]:
         await send_byte(dut, value)
 
     await send_byte(dut, CMD_COMPUTE)
-
     await ClockCycles(dut.clk, 20)
 
     result_bytes = []
-    for _ in range(18):
+    for _ in range(6):
         result_bytes.append(await read_byte(dut))
 
-    def le32(bytes4):
-        value = bytes4[0] | (bytes4[1] << 8) | (bytes4[2] << 16) | (bytes4[3] << 24)
-        if value & 0x80000000:
-            value -= 0x100000000
-        return value
+    c00 = A[0][0] * B[0][0] + A[0][1] * B[1][0]
+    c01 = A[0][0] * B[0][1] + A[0][1] * B[1][1]
+    c10 = A[1][0] * B[0][0] + A[1][1] * B[1][0]
+    c11 = A[1][0] * B[0][1] + A[1][1] * B[1][1]
 
-    c00 = le32(result_bytes[0:4])
-    c01 = le32(result_bytes[4:8])
-    c10 = le32(result_bytes[8:12])
-    c11 = le32(result_bytes[12:16])
-    cycles = result_bytes[16] | (result_bytes[17] << 8)
+    expected = [
+        relu_quant8(c00, shift),
+        relu_quant8(c01, shift),
+        relu_quant8(c10, shift),
+        relu_quant8(c11, shift),
+    ]
 
-    assert c00 == 19, f"c00 expected 19, got {c00}"
-    assert c01 == 22, f"c01 expected 22, got {c01}"
-    assert c10 == 43, f"c10 expected 43, got {c10}"
-    assert c11 == 50, f"c11 expected 50, got {c11}"
+    cycles = result_bytes[4] | (result_bytes[5] << 8)
+
+    assert result_bytes[0:4] == expected, f"expected {expected}, got {result_bytes[0:4]}"
     assert cycles > 0, f"cycle counter expected > 0, got {cycles}"
 
-    dut._log.info(f"Matrix result: [[{c00}, {c01}], [{c10}, {c11}]]")
+    dut._log.info(f"Quantized output: {result_bytes[0:4]}")
     dut._log.info(f"Measured accelerator latency: {cycles} cycles")
