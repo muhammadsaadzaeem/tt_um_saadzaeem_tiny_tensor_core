@@ -48,7 +48,7 @@ async def test_matrix_multiply(dut):
     await ClockCycles(dut.clk, 20)
 
     result_bytes = []
-    for _ in range(16):
+    for _ in range(18):
         result_bytes.append(await read_byte(dut))
 
     def le32(bytes4):
@@ -61,8 +61,13 @@ async def test_matrix_multiply(dut):
     c01 = le32(result_bytes[4:8])
     c10 = le32(result_bytes[8:12])
     c11 = le32(result_bytes[12:16])
+    cycles = result_bytes[16] | (result_bytes[17] << 8)
 
     assert c00 == 19, f"c00 expected 19, got {c00}"
     assert c01 == 22, f"c01 expected 22, got {c01}"
     assert c10 == 43, f"c10 expected 43, got {c10}"
     assert c11 == 50, f"c11 expected 50, got {c11}"
+    assert cycles > 0, f"cycle counter expected > 0, got {cycles}"
+
+    dut._log.info(f"Matrix result: [[{c00}, {c01}], [{c10}, {c11}]]")
+    dut._log.info(f"Measured accelerator latency: {cycles} cycles")

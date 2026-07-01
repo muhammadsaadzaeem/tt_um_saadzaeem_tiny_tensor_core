@@ -11,8 +11,9 @@ module tt_um_saadzaeem_tiny_tensor_core (
     input  wire       rst_n
 );
 
-assign uio_oe  = 8'hFE;              // uio[0] input strobe, rest outputs
+assign uio_oe  = 8'hFE;
 assign uio_out = {3'b000, done, state};
+
 wire strobe = uio_in[0];
 wire unused = &{ena, uio_in[7:1]};
 
@@ -32,6 +33,9 @@ localparam S_DONE  = 4'd7;
 reg [3:0] state;
 reg [3:0] load_idx;
 reg [4:0] read_idx;
+
+reg [15:0] cycle_counter;
+reg [15:0] last_cycles;
 
 reg signed [7:0] a00, a01, a10, a11;
 reg signed [7:0] b00, b01, b10, b11;
@@ -64,6 +68,8 @@ always @(posedge clk) begin
         state <= S_IDLE;
         load_idx <= 0;
         read_idx <= 0;
+        cycle_counter <= 0;
+        last_cycles <= 0;
         uo_out <= 0;
 
         a00 <= 0; a01 <= 0; a10 <= 0; a11 <= 0;
@@ -87,6 +93,8 @@ always @(posedge clk) begin
                     state <= S_LOAD;
                 end else if (strobe && ui_in == CMD_COMPUTE) begin
                     accel_rst <= 1;
+                    cycle_counter <= 0;
+                    last_cycles <= 0;
                     state <= S_RESET;
                 end
             end
@@ -114,11 +122,13 @@ always @(posedge clk) begin
 
             S_RESET: begin
                 accel_rst <= 0;
+                cycle_counter <= cycle_counter + 1;
                 state <= S_RUN0;
             end
 
             S_RUN0: begin
                 valid <= 1;
+                cycle_counter <= cycle_counter + 1;
                 a0_in <= a00;
                 a1_in <= 8'sd0;
                 b0_in <= b00;
@@ -128,6 +138,7 @@ always @(posedge clk) begin
 
             S_RUN1: begin
                 valid <= 1;
+                cycle_counter <= cycle_counter + 1;
                 a0_in <= a01;
                 a1_in <= a10;
                 b0_in <= b10;
@@ -137,6 +148,7 @@ always @(posedge clk) begin
 
             S_RUN2: begin
                 valid <= 1;
+                cycle_counter <= cycle_counter + 1;
                 a0_in <= 8'sd0;
                 a1_in <= a11;
                 b0_in <= 8'sd0;
@@ -150,8 +162,11 @@ always @(posedge clk) begin
                 b0_in <= 0; b1_in <= 0;
 
                 if (done) begin
+                    last_cycles <= cycle_counter;
                     read_idx <= 0;
                     state <= S_DONE;
+                end else begin
+                    cycle_counter <= cycle_counter + 1;
                 end
             end
 
@@ -178,10 +193,13 @@ always @(posedge clk) begin
                         5'd14: uo_out <= c11[23:16];
                         5'd15: uo_out <= c11[31:24];
 
+                        5'd16: uo_out <= last_cycles[7:0];
+                        5'd17: uo_out <= last_cycles[15:8];
+
                         default: uo_out <= 8'h00;
                     endcase
 
-                    if (read_idx < 5'd15)
+                    if (read_idx < 5'd17)
                         read_idx <= read_idx + 1;
                 end else if (strobe && ui_in == CMD_LOAD) begin
                     load_idx <= 0;
@@ -190,6 +208,8 @@ always @(posedge clk) begin
                 end else if (strobe && ui_in == CMD_COMPUTE) begin
                     read_idx <= 0;
                     accel_rst <= 1;
+                    cycle_counter <= 0;
+                    last_cycles <= 0;
                     state <= S_RESET;
                 end
             end
