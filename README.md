@@ -1,44 +1,51 @@
-![](../../workflows/gds/badge.svg) ![](../../workflows/docs/badge.svg) ![](../../workflows/test/badge.svg) ![](../../workflows/fpga/badge.svg)
+![](../../workflows/gds/badge.svg) ![](../../workflows/docs/badge.svg) ![](../../workflows/test/badge.svg)
 
-# Tiny Tapeout Verilog Project Template
+# Tiny Tensor Core
 
-- [Read the documentation for project](docs/info.md)
+An INT8 2x2 systolic-array matrix multiplication accelerator designed in Verilog and implemented through the Tiny Tapeout SKY130 flow.
 
-## What is Tiny Tapeout?
+## Features
 
-Tiny Tapeout is an educational project that aims to make it easier and cheaper than ever to get your digital and analog designs manufactured on a real chip.
+- 2x2 INT8 systolic-array matrix multiplication
+- ReLU activation
+- Programmable INT8 requantization
+- Cycle-count performance counter
+- Byte-strobe command interface
+- Randomized cocotb verification against a Python golden model
+- Passing Tiny Tapeout GDS, precheck, gate-level simulation, and viewer workflows
+- Validated on a Xilinx Zynq-7000 FPGA
 
-To learn more and get started, visit https://tinytapeout.com.
+## Commands
 
-## Set up your Verilog project
+| Command | Value | Description |
+|---|---:|---|
+| LOAD | 0xA0 | Load matrix A and B values |
+| COMPUTE | 0xB0 | Start accelerator computation |
+| READ | 0xC0 | Read INT8 outputs and cycle count |
+| SHIFT | 0xD0 | Set requantization right-shift amount |
 
-1. Add your Verilog files to the `src` folder.
-2. Edit the [info.yaml](info.yaml) and update information about your project, paying special attention to the `source_files` and `top_module` properties. If you are upgrading an existing Tiny Tapeout project, check out our [online info.yaml migration tool](https://tinytapeout.github.io/tt-yaml-upgrade-tool/).
-3. Edit [docs/info.md](docs/info.md) and add a description of your project.
-4. Adapt the testbench to your design. See [test/README.md](test/README.md) for more information.
+## Output Format
 
-The GitHub action will automatically build the ASIC files using [LibreLane](https://www.zerotoasiccourse.com/terminology/librelane/).
+READ returns:
 
-## Enable GitHub actions to build the results page
+1. C00 INT8
+2. C01 INT8
+3. C10 INT8
+4. C11 INT8
+5. Cycle count low byte
+6. Cycle count high byte
 
-- [Enabling GitHub Pages](https://tinytapeout.com/faq/#my-github-action-is-failing-on-the-pages-part)
+## Verification
 
-## Resources
+The design is verified using cocotb with randomized INT8 test matrices. The hardware output is compared against a Python golden model that performs matrix multiplication, ReLU, requantization, and saturation.
 
-- [FAQ](https://tinytapeout.com/faq/)
-- [Digital design lessons](https://tinytapeout.com/digital_design/)
-- [Learn how semiconductors work](https://tinytapeout.com/siliwiz/)
-- [Join the community](https://tinytapeout.com/discord)
-- [Build your design locally](https://www.tinytapeout.com/guides/local-hardening/)
+## Status
 
-## What next?
+Tiny Tapeout flow passing:
 
-- [Submit your design to the next shuttle](https://app.tinytapeout.com/).
-- Edit [this README](README.md) and explain your design, how it works, and how to test it.
-- Share your project on your social network of choice:
-  - LinkedIn [#tinytapeout](https://www.linkedin.com/search/results/content/?keywords=%23tinytapeout) [@TinyTapeout](https://www.linkedin.com/company/100708654/)
-  - Mastodon [#tinytapeout](https://chaos.social/tags/tinytapeout) [@matthewvenn](https://chaos.social/@matthewvenn)
-  - X (formerly Twitter) [#tinytapeout](https://twitter.com/hashtag/tinytapeout) [@tinytapeout](https://twitter.com/tinytapeout)
-  - Bluesky [@tinytapeout.com](https://bsky.app/profile/tinytapeout.com)
-
-  
+- docs
+- test
+- gds
+- precheck
+- gate-level test
+- viewer
