@@ -1,20 +1,20 @@
-<!---
-
-This file is used to generate your project datasheet. Please fill in the information below and delete any unused
-sections.
-
-You can also include images in this folder and reference them in the markdown. Each image must be less than
-512 kb in size, and the combined size of all images must be less than 1 MB.
--->
+# Tiny Tensor Core
 
 ## How it works
 
-This project implements a 2x2 INT8 systolic-array matrix multiplication accelerator. Matrix values are loaded through an 8-bit byte-serial input interface. A small control FSM feeds skewed operands into four processing elements, computes the matrix product, and streams the 32-bit results back over the 8-bit output port.
+This project implements an INT8 2x2 systolic-array matrix multiplication accelerator. It uses four processing elements arranged as a 2x2 systolic array. Matrix values are loaded through an 8-bit byte-strobe command interface, then a control FSM feeds skewed operands into the array.
+
+The accelerator computes matrix multiplication using INT8 operands and INT32 accumulation. After accumulation, the outputs pass through ReLU activation and programmable INT8 requantization using a right-shift scale factor. The design also includes a cycle-count performance counter that reports computation latency.
 
 ## How to test
 
-The cocotb testbench loads matrices A = [[1, 2], [3, 4]] and B = [[5, 6], [7, 8]], starts computation, then reads back the result matrix. The expected output is C = [[19, 22], [43, 50]].
+The cocotb testbench loads randomized INT8 matrices, sets a requantization shift amount, starts computation, and reads back the quantized INT8 output values plus the cycle count.
 
-## External hardware
+The expected outputs are calculated using a Python golden model that performs:
 
-List external hardware used in your project (e.g. PMOD, LED display, etc), if any
+1. 2x2 matrix multiplication
+2. ReLU activation
+3. right-shift requantization
+4. saturation to INT8 range
+
+The GitHub Actions flow verifies RTL simulation, gate-level simulation, GDS generation, precheck, and documentation.
