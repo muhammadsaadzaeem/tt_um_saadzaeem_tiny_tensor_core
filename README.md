@@ -39,6 +39,28 @@ READ returns:
 
 The design is verified using cocotb with randomized INT8 test matrices. The hardware output is compared against a Python golden model that performs matrix multiplication, ReLU, requantization, and saturation.
 
+# Project Images
+
+## RTL Architecture
+
+![RTL Architecture](images/systolic_array_4_pe_synthesized_design.png)
+
+## Systolic Array Hierarchy
+
+![Hierarchy](images/04_systolic_array_hierarchy.png)
+
+## Simulation Results
+
+![Simulation](images/02_simulation_correct_outputs.png)
+
+## FPGA Validation
+
+![FPGA](images/05_hardware_manager_programmed.png)
+
+## FPGA Resource Utilization
+
+![Utilization](images/03_utilization_report.png)
+
 ## Status
 
 Tiny Tapeout flow passing:
