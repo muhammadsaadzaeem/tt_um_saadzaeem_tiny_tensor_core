@@ -17,24 +17,22 @@ assign uio_out = {3'b000, done, state};
 wire strobe = uio_in[0];
 wire unused = &{ena, uio_in[7:1]};
 
-localparam CMD_LOAD    = 8'hA0;
-localparam CMD_COMPUTE = 8'hB0;
-localparam CMD_READ    = 8'hC0;
-localparam CMD_SHIFT   = 8'hD0;
+localparam CMD_WRITE_REG = 8'hE0;
+localparam CMD_READ_REG  = 8'hE1;
 
-localparam S_IDLE  = 4'd0;
-localparam S_LOAD  = 4'd1;
-localparam S_RESET = 4'd2;
-localparam S_RUN0  = 4'd3;
-localparam S_RUN1  = 4'd4;
-localparam S_RUN2  = 4'd5;
-localparam S_WAIT  = 4'd6;
-localparam S_DONE  = 4'd7;
-localparam S_SHIFT = 4'd8;
+localparam S_IDLE       = 4'd0;
+localparam S_WR_ADDR    = 4'd1;
+localparam S_WR_DATA    = 4'd2;
+localparam S_RD_ADDR    = 4'd3;
+localparam S_RESET      = 4'd4;
+localparam S_RUN0       = 4'd5;
+localparam S_RUN1       = 4'd6;
+localparam S_RUN2       = 4'd7;
+localparam S_WAIT       = 4'd8;
+localparam S_DONE       = 4'd9;
 
 reg [3:0] state;
-reg [3:0] load_idx;
-reg [3:0] read_idx;
+reg [7:0] reg_addr;
 
 reg [3:0] shift_amount;
 reg [15:0] cycle_counter;
@@ -91,8 +89,7 @@ systolic_2x2_real accel (
 always @(posedge clk) begin
     if (!rst_n) begin
         state <= S_IDLE;
-        load_idx <= 0;
-        read_idx <= 0;
+        reg_addr <= 0;
         shift_amount <= 0;
         cycle_counter <= 0;
         last_cycles <= 0;
@@ -113,45 +110,68 @@ always @(posedge clk) begin
         case (state)
 
             S_IDLE: begin
-                if (strobe && ui_in == CMD_LOAD) begin
-                    load_idx <= 0;
-                    read_idx <= 0;
-                    state <= S_LOAD;
-                end else if (strobe && ui_in == CMD_COMPUTE) begin
-                    accel_rst <= 1;
-                    cycle_counter <= 0;
-                    last_cycles <= 0;
-                    state <= S_RESET;
-                end else if (strobe && ui_in == CMD_SHIFT) begin
-                    state <= S_SHIFT;
+                if (strobe && ui_in == CMD_WRITE_REG)
+                    state <= S_WR_ADDR;
+                else if (strobe && ui_in == CMD_READ_REG)
+                    state <= S_RD_ADDR;
+            end
+
+            S_WR_ADDR: begin
+                if (strobe) begin
+                    reg_addr <= ui_in;
+                    state <= S_WR_DATA;
                 end
             end
 
-            S_SHIFT: begin
+            S_WR_DATA: begin
                 if (strobe) begin
-                    shift_amount <= ui_in[3:0];
-                    state <= S_IDLE;
-                end
-            end
+                    case (reg_addr)
+                        8'h00: a00 <= ui_in;
+                        8'h01: a01 <= ui_in;
+                        8'h02: a10 <= ui_in;
+                        8'h03: a11 <= ui_in;
+                        8'h04: b00 <= ui_in;
+                        8'h05: b01 <= ui_in;
+                        8'h06: b10 <= ui_in;
+                        8'h07: b11 <= ui_in;
+                        8'h08: shift_amount <= ui_in[3:0];
 
-            S_LOAD: begin
-                if (strobe) begin
-                    case (load_idx)
-                        4'd0: a00 <= ui_in;
-                        4'd1: a01 <= ui_in;
-                        4'd2: a10 <= ui_in;
-                        4'd3: a11 <= ui_in;
-                        4'd4: b00 <= ui_in;
-                        4'd5: b01 <= ui_in;
-                        4'd6: b10 <= ui_in;
-                        4'd7: b11 <= ui_in;
+                        8'h09: begin
+                            if (ui_in[0]) begin
+                                accel_rst <= 1;
+                                cycle_counter <= 0;
+                                last_cycles <= 0;
+                                state <= S_RESET;
+                            end else begin
+                                state <= S_IDLE;
+                            end
+                        end
+
                         default: ;
                     endcase
 
-                    if (load_idx == 4'd7)
+                    if (reg_addr != 8'h09)
                         state <= S_IDLE;
-                    else
-                        load_idx <= load_idx + 1;
+                end
+            end
+
+            S_RD_ADDR: begin
+                if (strobe) begin
+                    case (ui_in)
+                        8'h08: uo_out <= {4'b0000, shift_amount};
+                        8'h0A: uo_out <= {7'b0000000, done};
+
+                        8'h10: uo_out <= q00;
+                        8'h11: uo_out <= q01;
+                        8'h12: uo_out <= q10;
+                        8'h13: uo_out <= q11;
+
+                        8'h14: uo_out <= last_cycles[7:0];
+                        8'h15: uo_out <= last_cycles[15:8];
+
+                        default: uo_out <= 8'h00;
+                    endcase
+                    state <= S_IDLE;
                 end
             end
 
@@ -198,7 +218,6 @@ always @(posedge clk) begin
 
                 if (done) begin
                     last_cycles <= cycle_counter;
-                    read_idx <= 0;
                     state <= S_DONE;
                 end else begin
                     cycle_counter <= cycle_counter + 1;
@@ -206,32 +225,10 @@ always @(posedge clk) begin
             end
 
             S_DONE: begin
-                if (strobe && ui_in == CMD_READ) begin
-                    case (read_idx)
-                        4'd0: uo_out <= q00;
-                        4'd1: uo_out <= q01;
-                        4'd2: uo_out <= q10;
-                        4'd3: uo_out <= q11;
-                        4'd4: uo_out <= last_cycles[7:0];
-                        4'd5: uo_out <= last_cycles[15:8];
-                        default: uo_out <= 8'h00;
-                    endcase
-
-                    if (read_idx < 4'd5)
-                        read_idx <= read_idx + 1;
-                end else if (strobe && ui_in == CMD_LOAD) begin
-                    load_idx <= 0;
-                    read_idx <= 0;
-                    state <= S_LOAD;
-                end else if (strobe && ui_in == CMD_COMPUTE) begin
-                    read_idx <= 0;
-                    accel_rst <= 1;
-                    cycle_counter <= 0;
-                    last_cycles <= 0;
-                    state <= S_RESET;
-                end else if (strobe && ui_in == CMD_SHIFT) begin
-                    state <= S_SHIFT;
-                end
+                if (strobe && ui_in == CMD_WRITE_REG)
+                    state <= S_WR_ADDR;
+                else if (strobe && ui_in == CMD_READ_REG)
+                    state <= S_RD_ADDR;
             end
 
             default: state <= S_IDLE;

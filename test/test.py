@@ -3,10 +3,26 @@ import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, ClockCycles
 
-CMD_LOAD = 0xA0
-CMD_COMPUTE = 0xB0
-CMD_READ = 0xC0
-CMD_SHIFT = 0xD0
+CMD_WRITE_REG = 0xE0
+CMD_READ_REG = 0xE1
+
+REG_A00 = 0x00
+REG_A01 = 0x01
+REG_A10 = 0x02
+REG_A11 = 0x03
+REG_B00 = 0x04
+REG_B01 = 0x05
+REG_B10 = 0x06
+REG_B11 = 0x07
+REG_SHIFT = 0x08
+REG_CONTROL = 0x09
+REG_STATUS = 0x0A
+REG_Q00 = 0x10
+REG_Q01 = 0x11
+REG_Q10 = 0x12
+REG_Q11 = 0x13
+REG_CYCLES_L = 0x14
+REG_CYCLES_H = 0x15
 
 
 async def reset(dut):
@@ -28,12 +44,15 @@ async def send_byte(dut, value):
     await RisingEdge(dut.clk)
 
 
-async def read_byte(dut):
-    dut.ui_in.value = CMD_READ
-    dut.uio_in.value = 1
-    await RisingEdge(dut.clk)
-    dut.uio_in.value = 0
-    dut.ui_in.value = 0
+async def write_reg(dut, addr, data):
+    await send_byte(dut, CMD_WRITE_REG)
+    await send_byte(dut, addr)
+    await send_byte(dut, data)
+
+
+async def read_reg(dut, addr):
+    await send_byte(dut, CMD_READ_REG)
+    await send_byte(dut, addr)
     await RisingEdge(dut.clk)
     return int(dut.uo_out.value)
 
@@ -48,23 +67,34 @@ def relu_quant8(x, shift):
 
 
 async def run_case(dut, A, B, shift):
-    await send_byte(dut, CMD_SHIFT)
-    await send_byte(dut, shift)
-
-    await send_byte(dut, CMD_LOAD)
-
     values = [
-        A[0][0], A[0][1], A[1][0], A[1][1],
-        B[0][0], B[0][1], B[1][0], B[1][1],
+        (REG_A00, A[0][0]),
+        (REG_A01, A[0][1]),
+        (REG_A10, A[1][0]),
+        (REG_A11, A[1][1]),
+        (REG_B00, B[0][0]),
+        (REG_B01, B[0][1]),
+        (REG_B10, B[1][0]),
+        (REG_B11, B[1][1]),
     ]
 
-    for value in values:
-        await send_byte(dut, to_u8(value))
+    for addr, value in values:
+        await write_reg(dut, addr, to_u8(value))
 
-    await send_byte(dut, CMD_COMPUTE)
+    await write_reg(dut, REG_SHIFT, shift)
+    await write_reg(dut, REG_CONTROL, 1)
+
     await ClockCycles(dut.clk, 20)
 
-    result = [await read_byte(dut) for _ in range(6)]
+    status = await read_reg(dut, REG_STATUS)
+    assert status & 1, f"done bit not set, status={status}"
+
+    result = [
+        await read_reg(dut, REG_Q00),
+        await read_reg(dut, REG_Q01),
+        await read_reg(dut, REG_Q10),
+        await read_reg(dut, REG_Q11),
+    ]
 
     c00 = A[0][0] * B[0][0] + A[0][1] * B[1][0]
     c01 = A[0][0] * B[0][1] + A[0][1] * B[1][1]
@@ -78,18 +108,16 @@ async def run_case(dut, A, B, shift):
         relu_quant8(c11, shift),
     ]
 
-    cycles = result[4] | (result[5] << 8)
+    cycles = (await read_reg(dut, REG_CYCLES_L)) | ((await read_reg(dut, REG_CYCLES_H)) << 8)
 
-    assert result[0:4] == expected, (
-        f"A={A}, B={B}, shift={shift}, expected={expected}, got={result[0:4]}"
-    )
+    assert result == expected, f"A={A}, B={B}, shift={shift}, expected={expected}, got={result}"
     assert cycles > 0, f"cycle counter expected > 0, got {cycles}"
 
-    dut._log.info(f"A={A}, B={B}, shift={shift}, output={result[0:4]}, cycles={cycles}")
+    dut._log.info(f"A={A}, B={B}, shift={shift}, output={result}, cycles={cycles}")
 
 
 @cocotb.test()
-async def test_randomized_requantized_matmul(dut):
+async def test_register_mapped_tensor_core(dut):
     cocotb.start_soon(Clock(dut.clk, 20, units="ns").start())
     await reset(dut)
 
