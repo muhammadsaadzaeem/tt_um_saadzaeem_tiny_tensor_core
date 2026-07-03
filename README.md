@@ -43,23 +43,23 @@ The design is verified using cocotb with randomized INT8 test matrices. The hard
 
 ## RTL Architecture
 
-![RTL Architecture](images/systolic_array_4_pe_synthesized_design.png)
+![RTL Architecture](Images/systolic_array_4_pe_synthesized_design.png)
 
 ## Systolic Array Hierarchy
 
-![Hierarchy](images/04_systolic_array_hierarchy.png)
+![Hierarchy](Images/04_systolic_array_hierarchy.png)
 
 ## Simulation Results
 
-![Simulation](images/02_simulation_correct_outputs.png)
+![Simulation](Images/02_simulation_correct_outputs.png)
 
 ## FPGA Validation
 
-![FPGA](images/05_hardware_manager_programmed.png)
+![FPGA](Images/05_hardware_manager_programmed.png)
 
 ## FPGA Resource Utilization
 
-![Utilization](images/03_utilization_report.png)
+![Utilization](Images/03_utilization_report.png)
 
 ## Status
 
@@ -84,5 +84,5 @@ Tiny Tapeout flow passing:
 The design successfully completed the Tiny Tapeout SKY130 ASIC implementation flow, generating a manufacturable GDSII layout.
 
 <p align="center">
-<img src="images/final_gds_layout.png" width="700">
+<img src="Images/final_gds_layout.png" width="700">
 </p>
