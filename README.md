@@ -61,7 +61,7 @@ The design is verified using cocotb with randomized INT8 test matrices. The hard
 
 The design was synthesized and programmed onto a Xilinx Zynq-7000 FPGA board using Vivado Hardware Manager for hardware validation.
 
-![FPGA Hardware Validation](Images/docsimagesfpga_hardware_validation.jpg)
+![FPGA Hardware Validation](images/docsimagesfpga_hardware_validation.jpg)
 
 ## FPGA Resource Utilization
 
