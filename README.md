@@ -71,3 +71,18 @@ Tiny Tapeout flow passing:
 - precheck
 - gate-level test
 - viewer
+
+## Results
+
+- Tiny Tapeout flow: passing docs, test, gds, precheck, gate-level simulation, and viewer
+- FPGA validation: deployed on Xilinx Zynq-7000 Blackboard
+- Verification: randomized cocotb tests against Python golden model
+- Features: systolic array, ReLU, INT8 requantization, register-mapped interface, cycle counter
+
+## Final ASIC Layout (GDS)
+
+The design successfully completed the Tiny Tapeout SKY130 ASIC implementation flow, generating a manufacturable GDSII layout.
+
+<p align="center">
+<img src="images/final_gds_layout.png" width="700">
+</p>
